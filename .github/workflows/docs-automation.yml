@@ -1,0 +1,49 @@
+name: BrainSAIT Docs Automation
+
+on:
+  issues:
+    types: [opened, closed, labeled]
+  pull_request:
+    types: [opened, closed, merged]
+  push:
+    branches: [main]
+
+jobs:
+  generate-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install Dependencies
+        run: |
+          npm install -g @gitbook/cli
+          npm install openai axios dotenv
+          
+      - name: Generate Bilingual Documentation
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITBOOK_TOKEN: ${{ secrets.GITBOOK_TOKEN }}
+          GITHUB_ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_ISSUE_TITLE: ${{ github.event.issue.title }}
+          GITHUB_ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          if [ -f "scripts/generate-docs.js" ]; then
+            node scripts/generate-docs.js
+          else
+            echo "Documentation generation script not found"
+          fi
+          
+      - name: Deploy to GitBook
+        if: success()
+        run: |
+          if command -v gitbook &> /dev/null; then
+            gitbook build ./docs
+            echo "GitBook build completed"
+          else
+            echo "GitBook CLI not available"
+          fi

@@ -1,0 +1,18 @@
+root: ./docs/
+
+structure:
+  readme: README.md
+  summary: SUMMARY.md
+
+format:
+  - markdown
+  - pdf
+  - epub
+
+i18n:
+  - code: en
+    name: English
+    default: true
+  - code: ar
+    name: العربية
+    direction: rtl
