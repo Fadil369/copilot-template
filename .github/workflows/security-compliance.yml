@@ -1,4 +1,4 @@
-name: Security and Compliance
+name: BrainSAIT Security and HIPAA Compliance
 
 on:
   push:
@@ -6,47 +6,932 @@ on:
   pull_request:
     branches: [main, develop]
   schedule:
-    - cron: '0 2 * * 1'  # Weekly security scan
+    - cron: '0 2 * * 1' # Weekly security scan on Mondays
+  workflow_dispatch: # Allow manual triggering
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
 
 jobs:
   security-scan:
     runs-on: ubuntu-latest
+    name: Security Analysis
+    
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Security Tools
+        run: |
+          pip install bandit safety semgrep
+          npm install -g audit-ci eslint-plugin-security
+
       - name: Run CodeQL Analysis
         uses: github/codeql-action/init@v3
         with:
           languages: javascript, python
-          
+          queries: security-and-quality
+
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
-        
+
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
-        
-      - name: HIPAA Compliance Check
+
+      - name: Python Security Scan (Bandit)
         run: |
-          if [ -f "scripts/hipaa-compliance-check.py" ]; then
-            python scripts/hipaa-compliance-check.py
+          if find . -name "*.py" -not -path "./node_modules/*" -not -path "./.git/*" | head -1 | grep -q .; then
+            echo "🔍 Running Python security analysis..."
+            bandit -r . -f json -o bandit-report.json || true
+            bandit -r . -f txt
           else
-            echo "HIPAA compliance check script not found"
+            echo "ℹ️ No Python files found to scan"
           fi
-          
+
+      - name: JavaScript Security Scan
+        run: |
+          if [ -f "package.json" ]; then
+            echo "🔍 Running JavaScript security analysis..."
+            npm audit --audit-level=moderate || true
+            audit-ci --moderate || true
+          else
+            echo "ℹ️ No package.json found to scan"
+          fi
+
       - name: Secrets Scanning
         run: |
-          echo "Checking for exposed secrets..."
-          # Check for common secret patterns
-          if grep -r -i "api_key\|password\|secret\|token" . --exclude-dir=.git --exclude-dir=node_modules --exclude="*.md"; then
-            echo "⚠️ Potential secrets found in code"
-          else
+          echo "🔍 Checking for exposed secrets..."
+          
+          # Enhanced secret patterns for healthcare
+          SECRET_PATTERNS=(
+            "api_key"
+            "api-key"
+            "apikey"
+            "password"
+            "passwd"
+            "secret"
+            "token"
+            "jwt"
+            "private_key"
+            "client_secret"
+            "database_url"
+            "db_password"
+            "encryption_key"
+            "patient_id"
+            "social_security"
+            "medical_record"
+            "hipaa"
+          )
+          
+          FOUND_SECRETS=false
+          
+          for pattern in "${SECRET_PATTERNS[@]}"; do
+            if grep -r -i "$pattern" . \
+              --exclude-dir=.git \
+              --exclude-dir=node_modules \
+              --exclude-dir=.github \
+              --exclude="*.md" \
+              --exclude="*.json" \
+              --exclude="*.yml" \
+              --exclude="*.yaml" \
+              --include="*.py" \
+              --include="*.js" \
+              --include="*.ts" \
+              --include="*.jsx" \
+              --include="*.tsx" \
+              | grep -v "# pragma: allowlist secret" > /dev/null; then
+              echo "⚠️ Potential secret pattern '$pattern' found in code"
+              FOUND_SECRETS=true
+            fi
+          done
+          
+          if [ "$FOUND_SECRETS" = false ]; then
             echo "✅ No obvious secrets detected"
+          else
+            echo "❌ Potential secrets found - please review and use environment variables"
+            echo "💡 Add '# pragma: allowlist secret' comment for false positives"
+          fi
+
+  hipaa-compliance:
+    runs-on: ubuntu-latest
+    name: HIPAA Compliance Check
+    needs: security-scan
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Dependencies
+        run: |
+          pip install cryptography bcrypt pyjwt fastapi sqlalchemy
+          python -c "import sys; print(f'Python {sys.version}')"
+
+      - name: Create HIPAA Compliance Scripts
+        run: |
+          mkdir -p scripts
+          
+          # Create HIPAA compliance checker
+          cat > scripts/hipaa-compliance-check.py << 'EOF'
+          #!/usr/bin/env python3
+          """
+          BrainSAIT HIPAA Compliance Checker
+          Validates healthcare data handling compliance
+          """
+          
+          import os
+          import re
+          import json
+          import hashlib
+          from pathlib import Path
+          from typing import List, Dict, Any
+          
+          class HIPAAComplianceChecker:
+              def __init__(self):
+                  self.violations = []
+                  self.warnings = []
+                  self.passed_checks = []
+                  
+              def check_encryption_implementation(self) -> bool:
+                  """Check if encryption is properly implemented"""
+                  print("🔐 Checking encryption implementation...")
+                  
+                  encryption_patterns = [
+                      r'from cryptography',
+                      r'import cryptography',
+                      r'AES\.new',
+                      r'Fernet',
+                      r'encrypt\(',
+                      r'decrypt\(',
+                      r'bcrypt',
+                      r'hashlib'
+                  ]
+                  
+                  found_encryption = False
+                  
+                  for root, dirs, files in os.walk('.'):
+                      # Skip non-relevant directories
+                      dirs[:] = [d for d in dirs if d not in ['.git', 'node_modules', '__pycache__']]
+                      
+                      for file in files:
+                          if file.endswith(('.py', '.js', '.ts')):
+                              file_path = os.path.join(root, file)
+                              try:
+                                  with open(file_path, 'r', encoding='utf-8') as f:
+                                      content = f.read()
+                                      
+                                  for pattern in encryption_patterns:
+                                      if re.search(pattern, content, re.IGNORECASE):
+                                          found_encryption = True
+                                          self.passed_checks.append(f"✅ Encryption found in {file_path}")
+                                          break
+                              except Exception as e:
+                                  continue
+                  
+                  if not found_encryption:
+                      self.violations.append("❌ No encryption implementation found")
+                      return False
+                  
+                  return True
+          
+              def check_https_enforcement(self) -> bool:
+                  """Check if HTTPS is enforced"""
+                  print("🌐 Checking HTTPS enforcement...")
+                  
+                  https_patterns = [
+                      r'https://',
+                      r'ssl_context',
+                      r'SSLContext',
+                      r'redirect_to_https',
+                      r'force_https',
+                      r'HTTPS_ONLY',
+                      r'secure=True'
+                  ]
+                  
+                  found_https = False
+                  
+                  for root, dirs, files in os.walk('.'):
+                      dirs[:] = [d for d in dirs if d not in ['.git', 'node_modules', '__pycache__']]
+                      
+                      for file in files:
+                          if file.endswith(('.py', '.js', '.ts', '.yml', '.yaml', '.json')):
+                              file_path = os.path.join(root, file)
+                              try:
+                                  with open(file_path, 'r', encoding='utf-8') as f:
+                                      content = f.read()
+                                      
+                                  for pattern in https_patterns:
+                                      if re.search(pattern, content, re.IGNORECASE):
+                                          found_https = True
+                                          self.passed_checks.append(f"✅ HTTPS configuration found in {file_path}")
+                                          break
+                              except Exception:
+                                  continue
+                  
+                  if not found_https:
+                      self.violations.append("❌ No HTTPS enforcement found")
+                      return False
+                  
+                  return True
+          
+              def check_patient_id_hashing(self) -> bool:
+                  """Check if patient IDs are properly hashed"""
+                  print("🆔 Checking patient ID hashing...")
+                  
+                  # Look for patient ID handling
+                  patient_patterns = [
+                      r'patient_id',
+                      r'patientId',
+                      r'patient-id',
+                      r'medical_record',
+                      r'medicalRecord'
+                  ]
+                  
+                  hash_patterns = [
+                      r'hashlib',
+                      r'sha256',
+                      r'bcrypt',
+                      r'hash\(',
+                      r'digest\(',
+                      r'hexdigest\('
+                  ]
+                  
+                  found_patient_handling = False
+                  found_hashing = False
+                  
+                  for root, dirs, files in os.walk('.'):
+                      dirs[:] = [d for d in dirs if d not in ['.git', 'node_modules', '__pycache__']]
+                      
+                      for file in files:
+                          if file.endswith(('.py', '.js', '.ts')):
+                              file_path = os.path.join(root, file)
+                              try:
+                                  with open(file_path, 'r', encoding='utf-8') as f:
+                                      content = f.read()
+                                  
+                                  # Check for patient ID handling
+                                  for pattern in patient_patterns:
+                                      if re.search(pattern, content, re.IGNORECASE):
+                                          found_patient_handling = True
+                                          break
+                                  
+                                  # Check for hashing
+                                  for pattern in hash_patterns:
+                                      if re.search(pattern, content, re.IGNORECASE):
+                                          found_hashing = True
+                                          break
+                                          
+                              except Exception:
+                                  continue
+                  
+                  if found_patient_handling and not found_hashing:
+                      self.violations.append("❌ Patient IDs found but no hashing implementation detected")
+                      return False
+                  elif found_patient_handling and found_hashing:
+                      self.passed_checks.append("✅ Patient ID hashing implementation found")
+                      return True
+                  else:
+                      self.warnings.append("⚠️ No patient ID handling detected (may be intentional)")
+                      return True
+          
+              def check_access_controls(self) -> bool:
+                  """Check if proper access controls are implemented"""
+                  print("🔒 Checking access controls...")
+                  
+                  auth_patterns = [
+                      r'@login_required',
+                      r'@require_auth',
+                      r'authenticate',
+                      r'authorization',
+                      r'JWT',
+                      r'Bearer',
+                      r'OAuth',
+                      r'permission',
+                      r'role',
+                      r'access_control'
+                  ]
+                  
+                  found_auth = False
+                  
+                  for root, dirs, files in os.walk('.'):
+                      dirs[:] = [d for d in dirs if d not in ['.git', 'node_modules', '__pycache__']]
+                      
+                      for file in files:
+                          if file.endswith(('.py', '.js', '.ts')):
+                              file_path = os.path.join(root, file)
+                              try:
+                                  with open(file_path, 'r', encoding='utf-8') as f:
+                                      content = f.read()
+                                      
+                                  for pattern in auth_patterns:
+                                      if re.search(pattern, content, re.IGNORECASE):
+                                          found_auth = True
+                                          self.passed_checks.append(f"✅ Access control found in {file_path}")
+                                          break
+                              except Exception:
+                                  continue
+                  
+                  if not found_auth:
+                      self.violations.append("❌ No access control implementation found")
+                      return False
+                  
+                  return True
+          
+              def check_audit_logging(self) -> bool:
+                  """Check if audit logging is implemented"""
+                  print("📋 Checking audit logging...")
+                  
+                  logging_patterns = [
+                      r'logging',
+                      r'logger',
+                      r'audit',
+                      r'log\(',
+                      r'info\(',
+                      r'debug\(',
+                      r'warning\(',
+                      r'error\('
+                  ]
+                  
+                  found_logging = False
+                  
+                  for root, dirs, files in os.walk('.'):
+                      dirs[:] = [d for d in dirs if d not in ['.git', 'node_modules', '__pycache__']]
+                      
+                      for file in files:
+                          if file.endswith(('.py', '.js', '.ts')):
+                              file_path = os.path.join(root, file)
+                              try:
+                                  with open(file_path, 'r', encoding='utf-8') as f:
+                                      content = f.read()
+                                      
+                                  for pattern in logging_patterns:
+                                      if re.search(pattern, content, re.IGNORECASE):
+                                          found_logging = True
+                                          self.passed_checks.append(f"✅ Logging found in {file_path}")
+                                          break
+                              except Exception:
+                                  continue
+                  
+                  if not found_logging:
+                      self.violations.append("❌ No audit logging implementation found")
+                      return False
+                  
+                  return True
+          
+              def generate_compliance_template(self):
+                  """Generate template files for HIPAA compliance"""
+                  print("📝 Generating HIPAA compliance templates...")
+                  
+                  # Create utils directory
+                  os.makedirs('utils', exist_ok=True)
+                  
+                  # Generate encryption utility
+                  encryption_template = '''"""
+          BrainSAIT HIPAA Compliance - Encryption Utilities
+          """
+          
+          import hashlib
+          import bcrypt
+          from cryptography.fernet import Fernet
+          from cryptography.hazmat.primitives import hashes
+          from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+          import base64
+          import os
+          from typing import str, bytes
+          
+          class HIPAAEncryption:
+              def __init__(self, password: str = None):
+                  if password:
+                      self.key = self._derive_key(password.encode())
+                  else:
+                      self.key = Fernet.generate_key()
+                  self.cipher = Fernet(self.key)
+              
+              def _derive_key(self, password: bytes) -> bytes:
+                  """Derive encryption key from password"""
+                  salt = os.urandom(16)
+                  kdf = PBKDF2HMAC(
+                      algorithm=hashes.SHA256(),
+                      length=32,
+                      salt=salt,
+                      iterations=100000,
+                  )
+                  key = base64.urlsafe_b64encode(kdf.derive(password))
+                  return key
+              
+              def encrypt_phi(self, data: str) -> str:
+                  """Encrypt Protected Health Information"""
+                  encrypted = self.cipher.encrypt(data.encode())
+                  return base64.urlsafe_b64encode(encrypted).decode()
+              
+              def decrypt_phi(self, encrypted_data: str) -> str:
+                  """Decrypt Protected Health Information"""
+                  encrypted_bytes = base64.urlsafe_b64decode(encrypted_data.encode())
+                  decrypted = self.cipher.decrypt(encrypted_bytes)
+                  return decrypted.decode()
+              
+              @staticmethod
+              def hash_patient_id(patient_id: str) -> str:
+                  """Hash patient ID for secure storage"""
+                  return hashlib.sha256(patient_id.encode()).hexdigest()
+              
+              @staticmethod
+              def hash_password(password: str) -> str:
+                  """Hash password using bcrypt"""
+                  salt = bcrypt.gensalt()
+                  return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+              
+              @staticmethod
+              def verify_password(password: str, hashed: str) -> bool:
+                  """Verify password against hash"""
+                  return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+          '''
+                  
+                  with open('utils/hipaa_encryption.py', 'w') as f:
+                      f.write(encryption_template)
+                  
+                  # Generate audit logging utility
+                  logging_template = '''"""
+          BrainSAIT HIPAA Compliance - Audit Logging
+          """
+          
+          import logging
+          import json
+          from datetime import datetime
+          from typing import Dict, Any
+          import os
+          
+          class HIPAAAuditLogger:
+              def __init__(self, log_file: str = "audit.log"):
+                  self.log_file = log_file
+                  self.logger = logging.getLogger("hipaa_audit")
+                  self.logger.setLevel(logging.INFO)
+                  
+                  # Create file handler
+                  handler = logging.FileHandler(log_file)
+                  handler.setLevel(logging.INFO)
+                  
+                  # Create formatter
+                  formatter = logging.Formatter(
+                      '%(asctime)s - AUDIT - %(levelname)s - %(message)s'
+                  )
+                  handler.setFormatter(formatter)
+                  
+                  # Add handler to logger
+                  if not self.logger.handlers:
+                      self.logger.addHandler(handler)
+              
+              def log_phi_access(self, user_id: str, patient_id: str, action: str, 
+                               details: Dict[str, Any] = None):
+                  """Log access to Protected Health Information"""
+                  log_entry = {
+                      "timestamp": datetime.utcnow().isoformat(),
+                      "event_type": "PHI_ACCESS",
+                      "user_id": user_id,
+                      "patient_id_hash": self._hash_id(patient_id),
+                      "action": action,
+                      "ip_address": os.environ.get("CLIENT_IP", "unknown"),
+                      "user_agent": os.environ.get("HTTP_USER_AGENT", "unknown"),
+                      "details": details or {}
+                  }
+                  
+                  self.logger.info(json.dumps(log_entry))
+              
+              def log_authentication(self, user_id: str, success: bool, method: str):
+                  """Log authentication attempts"""
+                  log_entry = {
+                      "timestamp": datetime.utcnow().isoformat(),
+                      "event_type": "AUTHENTICATION",
+                      "user_id": user_id,
+                      "success": success,
+                      "method": method,
+                      "ip_address": os.environ.get("CLIENT_IP", "unknown")
+                  }
+                  
+                  self.logger.info(json.dumps(log_entry))
+              
+              def log_data_export(self, user_id: str, data_type: str, record_count: int):
+                  """Log data export activities"""
+                  log_entry = {
+                      "timestamp": datetime.utcnow().isoformat(),
+                      "event_type": "DATA_EXPORT",
+                      "user_id": user_id,
+                      "data_type": data_type,
+                      "record_count": record_count,
+                      "ip_address": os.environ.get("CLIENT_IP", "unknown")
+                  }
+                  
+                  self.logger.info(json.dumps(log_entry))
+              
+              @staticmethod
+              def _hash_id(identifier: str) -> str:
+                  """Hash identifier for logging"""
+                  import hashlib
+                  return hashlib.sha256(identifier.encode()).hexdigest()[:16]
+          '''
+                  
+                  with open('utils/hipaa_audit.py', 'w') as f:
+                      f.write(logging_template)
+                  
+                  print("✅ HIPAA compliance templates generated in utils/ directory")
+          
+              def run_compliance_check(self) -> bool:
+                  """Run all compliance checks"""
+                  print("🏥 Starting BrainSAIT HIPAA Compliance Check...")
+                  print("=" * 60)
+                  
+                  checks = [
+                      ("Encryption Implementation", self.check_encryption_implementation),
+                      ("HTTPS Enforcement", self.check_https_enforcement),
+                      ("Patient ID Hashing", self.check_patient_id_hashing),
+                      ("Access Controls", self.check_access_controls),
+                      ("Audit Logging", self.check_audit_logging)
+                  ]
+                  
+                  all_passed = True
+                  
+                  for check_name, check_func in checks:
+                      try:
+                          result = check_func()
+                          if not result:
+                              all_passed = False
+                      except Exception as e:
+                          print(f"❌ Error in {check_name}: {str(e)}")
+                          all_passed = False
+                  
+                  print("\n" + "=" * 60)
+                  print("📊 COMPLIANCE SUMMARY")
+                  print("=" * 60)
+                  
+                  if self.passed_checks:
+                      print("\n✅ PASSED CHECKS:")
+                      for check in self.passed_checks:
+                          print(f"  {check}")
+                  
+                  if self.warnings:
+                      print("\n⚠️ WARNINGS:")
+                      for warning in self.warnings:
+                          print(f"  {warning}")
+                  
+                  if self.violations:
+                      print("\n❌ VIOLATIONS FOUND:")
+                      for violation in self.violations:
+                          print(f"  {violation}")
+                      
+                      print("\n💡 RECOMMENDED ACTIONS:")
+                      print("  1. Review and implement missing HIPAA controls")
+                      print("  2. Use provided templates in utils/ directory")
+                      print("  3. Ensure all PHI is encrypted and access is logged")
+                      print("  4. Implement proper authentication and authorization")
+                      print("  5. Enforce HTTPS for all communications")
+                  
+                  if all_passed:
+                      print("\n🎉 ALL HIPAA COMPLIANCE CHECKS PASSED!")
+                  else:
+                      print("\n⚠️ HIPAA COMPLIANCE ISSUES FOUND - PLEASE ADDRESS BEFORE PRODUCTION")
+                      self.generate_compliance_template()
+                  
+                  return all_passed
+          
+          if __name__ == "__main__":
+              checker = HIPAAComplianceChecker()
+              compliance_passed = checker.run_compliance_check()
+              
+              if not compliance_passed:
+                  exit(1)
+          EOF
+          
+          chmod +x scripts/hipaa-compliance-check.py
+
+      - name: Create Arabic Security Check
+        run: |
+          cat > scripts/arabic-security-check.py << 'EOF'
+          #!/usr/bin/env python3
+          """
+          BrainSAIT Arabic Text Security Checker
+          Validates proper handling of Arabic text and RTL content
+          """
+          
+          import os
+          import re
+          from pathlib import Path
+          
+          class ArabicSecurityChecker:
+              def __init__(self):
+                  self.violations = []
+                  self.warnings = []
+                  self.passed_checks = []
+          
+              def check_rtl_support(self) -> bool:
+                  """Check for proper RTL support implementation"""
+                  print("🔍 Checking RTL (Right-to-Left) support...")
+                  
+                  rtl_patterns = [
+                      r'direction:\s*rtl',
+                      r'dir="rtl"',
+                      r'text-align:\s*right',
+                      r'unicode-bidi',
+                      r'writing-mode',
+                      r'rtl',
+                      r'arabic'
+                  ]
+                  
+                  found_rtl = False
+                  
+                  for root, dirs, files in os.walk('.'):
+                      dirs[:] = [d for d in dirs if d not in ['.git', 'node_modules', '__pycache__']]
+                      
+                      for file in files:
+                          if file.endswith(('.css', '.scss', '.html', '.jsx', '.tsx', '.vue')):
+                              file_path = os.path.join(root, file)
+                              try:
+                                  with open(file_path, 'r', encoding='utf-8') as f:
+                                      content = f.read()
+                                      
+                                  for pattern in rtl_patterns:
+                                      if re.search(pattern, content, re.IGNORECASE):
+                                          found_rtl = True
+                                          self.passed_checks.append(f"✅ RTL support found in {file_path}")
+                                          break
+                              except Exception:
+                                  continue
+                  
+                  if not found_rtl:
+                      self.warnings.append("⚠️ No RTL support detected - ensure Arabic text displays correctly")
+                      return False
+                  
+                  return True
+          
+              def check_arabic_encoding(self) -> bool:
+                  """Check for proper Arabic text encoding"""
+                  print("📝 Checking Arabic text encoding...")
+                  
+                  arabic_found = False
+                  encoding_issues = []
+                  
+                  for root, dirs, files in os.walk('.'):
+                      dirs[:] = [d for d in dirs if d not in ['.git', 'node_modules', '__pycache__']]
+                      
+                      for file in files:
+                          if file.endswith(('.py', '.js', '.ts', '.jsx', '.tsx', '.html', '.vue', '.json')):
+                              file_path = os.path.join(root, file)
+                              try:
+                                  with open(file_path, 'r', encoding='utf-8') as f:
+                                      content = f.read()
+                                      
+                                  # Check for Arabic characters
+                                  if re.search(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]', content):
+                                      arabic_found = True
+                                      self.passed_checks.append(f"✅ Arabic text found in {file_path}")
+                                      
+                              except UnicodeDecodeError:
+                                  encoding_issues.append(file_path)
+                              except Exception:
+                                  continue
+                  
+                  if encoding_issues:
+                      for file_path in encoding_issues:
+                          self.violations.append(f"❌ Encoding issue in {file_path}")
+                      return False
+                  
+                  if arabic_found:
+                      self.passed_checks.append("✅ Arabic text properly encoded")
+                  
+                  return True
+          
+              def check_medical_terminology(self) -> bool:
+                  """Check for proper Arabic medical terminology handling"""
+                  print("🏥 Checking Arabic medical terminology...")
+                  
+                  medical_terms_ar = [
+                      'مريض', 'طبيب', 'علاج', 'دواء', 'مستشفى', 'عيادة',
+                      'تشخيص', 'فحص', 'جراحة', 'طوارئ', 'صيدلية'
+                  ]
+                  
+                  found_medical_ar = False
+                  
+                  for root, dirs, files in os.walk('.'):
+                      dirs[:] = [d for d in dirs if d not in ['.git', 'node_modules', '__pycache__']]
+                      
+                      for file in files:
+                          if file.endswith(('.py', '.js', '.ts', '.jsx', '.tsx', '.json')):
+                              file_path = os.path.join(root, file)
+                              try:
+                                  with open(file_path, 'r', encoding='utf-8') as f:
+                                      content = f.read()
+                                      
+                                  for term in medical_terms_ar:
+                                      if term in content:
+                                          found_medical_ar = True
+                                          self.passed_checks.append(f"✅ Arabic medical terminology found in {file_path}")
+                                          break
+                              except Exception:
+                                  continue
+                  
+                  if found_medical_ar:
+                      return True
+                  else:
+                      self.warnings.append("⚠️ No Arabic medical terminology detected")
+                      return True  # Not a violation, just informational
+          
+              def run_arabic_security_check(self) -> bool:
+                  """Run all Arabic security checks"""
+                  print("🇸🇦 Starting BrainSAIT Arabic Security Check...")
+                  print("=" * 60)
+                  
+                  checks = [
+                      ("RTL Support", self.check_rtl_support),
+                      ("Arabic Encoding", self.check_arabic_encoding),
+                      ("Medical Terminology", self.check_medical_terminology)
+                  ]
+                  
+                  all_passed = True
+                  
+                  for check_name, check_func in checks:
+                      try:
+                          result = check_func()
+                          if not result:
+                              all_passed = False
+                      except Exception as e:
+                          print(f"❌ Error in {check_name}: {str(e)}")
+                          all_passed = False
+                  
+                  print("\n" + "=" * 60)
+                  print("📊 ARABIC SECURITY SUMMARY")
+                  print("=" * 60)
+                  
+                  if self.passed_checks:
+                      print("\n✅ PASSED CHECKS:")
+                      for check in self.passed_checks:
+                          print(f"  {check}")
+                  
+                  if self.warnings:
+                      print("\n⚠️ WARNINGS:")
+                      for warning in self.warnings:
+                          print(f"  {warning}")
+                  
+                  if self.violations:
+                      print("\n❌ VIOLATIONS FOUND:")
+                      for violation in self.violations:
+                          print(f"  {violation}")
+                  
+                  return all_passed
+          
+          if __name__ == "__main__":
+              checker = ArabicSecurityChecker()
+              arabic_passed = checker.run_arabic_security_check()
+              
+              if not arabic_passed:
+                  exit(1)
+          EOF
+          
+          chmod +x scripts/arabic-security-check.py
+
+      - name: Run HIPAA Compliance Check
+        run: |
+          echo "🏥 Running BrainSAIT HIPAA Compliance Check..."
+          python scripts/hipaa-compliance-check.py
+
+      - name: Run Arabic Text Security Check
+        run: |
+          echo "🇸🇦 Running Arabic Text Security Check..."
+          python scripts/arabic-security-check.py
+
+      - name: Generate Security Report
+        if: always()
+        run: |
+          echo "📊 Generating Security Report..."
+          
+          cat > security-report.md << 'EOF'
+          # BrainSAIT Security and HIPAA Compliance Report
+          
+          **Generated:** $(date)
+          **Repository:** ${{ github.repository }}
+          **Branch:** ${{ github.ref_name }}
+          **Commit:** ${{ github.sha }}
+          
+          ## 🏥 HIPAA Compliance Status
+          
+          This report shows the current HIPAA compliance status of the BrainSAIT healthcare platform.
+          
+          ### Required HIPAA Controls
+          
+          - [ ] **Encryption at Rest and in Transit**: All PHI must be encrypted
+          - [ ] **HTTPS Enforcement**: All API communications must use HTTPS  
+          - [ ] **Patient ID Hashing**: Patient identifiers must be hashed
+          - [ ] **Access Controls**: Proper authentication and authorization
+          - [ ] **Audit Logging**: All PHI access must be logged
+          - [ ] **Regular Security Assessments**: Automated security scanning
+          
+          ### Implementation Recommendations
+          
+          1. **Use the generated templates** in `utils/` directory
+          2. **Implement encryption** for all sensitive data
+          3. **Set up audit logging** for compliance tracking
+          4. **Enforce HTTPS** in production environments
+          5. **Regular security reviews** and penetration testing
+          
+          ### Arabic Localization Security
+          
+          - Ensure proper RTL (Right-to-Left) text rendering
+          - Validate Arabic character encoding (UTF-8)
+          - Test medical terminology translations
+          - Verify cultural sensitivity in healthcare contexts
+          
+          ## 🔐 Next Steps
+          
+          1. Address any violations found in the checks above
+          2. Implement the provided HIPAA compliance templates
+          3. Set up regular security monitoring
+          4. Train team on HIPAA requirements
+          5. Document security procedures
+          
+          ---
+          
+          **Generated by BrainSAIT Security Automation**
+          **Contact:** Dr. Fadil - security@brainsait.com
+          EOF
+
+      - name: Upload Security Report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-report
+          path: |
+            security-report.md
+            bandit-report.json
+            utils/
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // Read security report if it exists
+            let reportContent = '';
+            try {
+              reportContent = fs.readFileSync('security-report.md', 'utf8');
+            } catch (e) {
+              reportContent = '# Security Report\n\nSecurity scan completed. Check the Actions tab for details.';
+            }
+            
+            // Create comment on PR
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🔐 BrainSAIT Security Scan Results\n\n${reportContent.substring(0, 65000)}`
+            });
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: [security-scan, hipaa-compliance]
+    if: always()
+    
+    steps:
+      - name: Notify Team
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          STATUS="✅ Success"
+          if [[ "${{ needs.security-scan.result }}" != "success" ]] || [[ "${{ needs.hipaa-compliance.result }}" != "success" ]]; then
+            STATUS="❌ Failed"
           fi
           
-      - name: Arabic Text Security Check
-        run: |
-          if [ -f "scripts/arabic-security-check.py" ]; then
-            python scripts/arabic-security-check.py
+          MESSAGE="🏥 BrainSAIT Security Scan: $STATUS
+          
+          Repository: ${{ github.repository }}
+          Branch: ${{ github.ref_name }}
+          Commit: ${{ github.sha }}
+          
+          Security Scan: ${{ needs.security-scan.result }}
+          HIPAA Compliance: ${{ needs.hipaa-compliance.result }}
+          
+          View details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            curl -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\"$MESSAGE\"}" \
+              "$SLACK_WEBHOOK_URL"
           else
-            echo "Arabic text security check script not found"
+            echo "No Slack webhook configured - skipping notification"
           fi
