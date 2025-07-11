@@ -1,7 +1,3 @@
-# This workflow configures CodeQL for advanced code scanning.
-# Review and adjust the 'matrix' section for your project's languages.
-# For more options, see: https://docs.github.com/en/code-security/code-scanning
-
 name: "CodeQL Advanced"
 
 on:
@@ -10,7 +6,6 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # Runs every Friday at 22:19 UTC
     - cron: '19 22 * * 5'
 
 permissions:
@@ -22,49 +17,24 @@ permissions:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          # List languages you want to analyze. Example:
-          - language: 'python'
-            build-mode: 'auto'
-          # - language: 'swift'
-          #   build-mode: 'auto'
-          # - language: 'javascript-typescript'
-          #   build-mode: 'auto'
-          # To analyze more languages, add them above.
+          - language: python
+            build-mode: none   # 'none' for Python, 'autobuild' or 'manual' for compiled languages
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-
-    # Optional: Add setup steps here (e.g., install dependencies).
-    # Example:
-    # - name: Setup Python
-    #   uses: actions/setup-python@v4
-    #   with:
-    #     python-version: '3.x'
 
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v3
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
-        # You can specify custom queries here, e.g.:
-        # queries: security-extended,security-and-quality
-
-    # Manual build step (only runs if build-mode is set to 'manual')
-    - name: Manual build
-      if: matrix.build-mode == 'manual'
-      shell: bash
-      run: |
-        echo 'Replace this with your build commands for manual build mode, e.g.:'
-        echo '  make bootstrap'
-        echo '  make release'
-        exit 1
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
