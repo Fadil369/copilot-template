@@ -36,8 +36,8 @@ jobs:
 
       - name: Install Security Tools
         run: |
-          pip install bandit safety semgrep
-          npm install -g audit-ci eslint-plugin-security
+          pip install bandit==1.7.4 safety==1.10.3 semgrep==1.20.0
+          npm install -g audit-ci@5.0.0 eslint-plugin-security@1.4.0
 
       - name: Run CodeQL Analysis
         uses: github/codeql-action/init@v3
