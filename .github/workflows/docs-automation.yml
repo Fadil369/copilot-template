@@ -13,17 +13,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          
-      - name: Install Dependencies
+
+      - name: Install GitBook CLI and Dependencies
         run: |
-          npm install -g @gitbook/cli
+          npm install -g gitbook-cli
+          if [ -f package.json ]; then
+            npm install
+          fi
           npm install openai axios dotenv
-          
+
       - name: Generate Bilingual Documentation
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -36,8 +39,9 @@ jobs:
             node scripts/generate-docs.js
           else
             echo "Documentation generation script not found"
+            exit 1
           fi
-          
+
       - name: Deploy to GitBook
         if: success()
         run: |
@@ -46,4 +50,5 @@ jobs:
             echo "GitBook build completed"
           else
             echo "GitBook CLI not available"
+            exit 1
           fi
