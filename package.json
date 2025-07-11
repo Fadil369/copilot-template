@@ -1,0 +1,44 @@
+{
+  "name": "brainsait-copilot-template",
+  "version": "2.0.0",
+  "description": "BrainSAIT GitHub Copilot Coding Agent Template for Healthcare AI",
+  "main": "index.js",
+  "scripts": {
+    "docs:generate": "node scripts/generate-docs.js",
+    "validate:arabic": "python scripts/validate-arabic-content.py",
+    "validate:hipaa": "python scripts/hipaa-compliance-check.py",
+    "lint": "echo 'Linting not configured - add ESLint/Prettier as needed'",
+    "test": "echo 'Testing not configured - add Jest/Pytest as needed'",
+    "security:audit": "npm audit --audit-level high"
+  },
+  "keywords": [
+    "healthcare-ai",
+    "copilot",
+    "arabic",
+    "bilingual",
+    "hipaa",
+    "template"
+  ],
+  "author": "Dr. Fadil - BrainSAIT",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Fadil369/copilot-template.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Fadil369/copilot-template/issues"
+  },
+  "homepage": "https://github.com/Fadil369/copilot-template#readme",
+  "devDependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.0"
+  },
+  "optionalDependencies": {
+    "@gitbook/cli": "^2.3.2",
+    "openai": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  }
+}

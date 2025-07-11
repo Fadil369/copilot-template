@@ -1,0 +1,31 @@
+# BrainSAIT GitHub Copilot Configuration
+# Custom configuration for BrainSAIT healthcare AI projects
+
+development_environment:
+  node_version: "20"
+  python_version: "3.11"
+  docker_enabled: true
+  
+project_context:
+  framework: "Next.js, FastAPI, Docker"
+  languages: ["TypeScript", "Python", "Arabic", "English"]
+  deployment: "Cloudflare Workers, Raspberry Pi"
+  testing: "Jest, Pytest, Playwright"
+  
+healthcare_compliance:
+  hipaa_enabled: true
+  data_encryption: true
+  audit_logging: true
+  access_controls: true
+  
+localization:
+  primary_language: "en"
+  secondary_language: "ar"
+  rtl_support: true
+  arabic_fonts: true
+  
+ai_preferences:
+  medical_terminology: true
+  arabic_technical_terms: true
+  compliance_awareness: true
+  security_focus: true
