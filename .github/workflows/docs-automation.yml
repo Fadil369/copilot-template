@@ -42,13 +42,31 @@ jobs:
             exit 1
           fi
 
+      - name: Check GitBook CLI and Folder Structure
+        run: |
+          if ! command -v gitbook &> /dev/null; then
+            echo "GitBook CLI is not available. Installation failed."
+            exit 1
+          fi
+          if [ ! -d "./docs" ]; then
+            echo "Docs folder not found."
+            exit 1
+          fi
+          if [ ! -f "./docs/README.md" ]; then
+            echo "Docs folder missing README.md."
+            exit 1
+          fi
+          echo "GitBook CLI and docs folder look good."
+          echo "Available GitBook commands:"
+          gitbook --help
+
       - name: Deploy to GitBook
         if: success()
         run: |
-          if command -v gitbook &> /dev/null; then
-            gitbook build ./docs
+          if gitbook build ./docs; then
             echo "GitBook build completed"
           else
-            echo "GitBook CLI not available"
+            echo "GitBook build failed. See above for command output and available commands."
+            echo "If you are using the new GitBook SaaS, CLI build is not supported. Use GitBook's GitHub integration or API instead."
             exit 1
           fi
